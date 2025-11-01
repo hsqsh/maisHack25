@@ -1,0 +1,53 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+*.egg-info/
+.eggs/
+.dist-info/
+dist/
+build/
+.cache/
+.python-version
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# ---- Ultralytics / YOLO ----
+# Training/eval outputs
+runs/
+# Common large exports (keep weights you intentionally track)
+*.onnx
+*.engine
+*.tflite
+*.xml
+*.bin
+
+# ---- Node / JS ----
+backend/node_modules/
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- OS / Editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- Misc ----
+# Local data, temp files
+*.tmp
+*.swp
+*.swo
+.tmp/
+.temp/
