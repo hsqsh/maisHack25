@@ -40,6 +40,16 @@ def detect(req: DetectReq):
     except Exception:
         raise HTTPException(status_code=400, detail="invalid image_b64")
 
+    # Save the last received image for debugging (models/last_received.jpg)
+    try:
+        save_dir = os.path.dirname(__file__)
+        save_path = os.path.join(save_dir, "last_received.jpg")
+        with open(save_path, "wb") as f:
+            f.write(img_bytes)
+    except Exception:
+        # non-fatal
+        pass
+
     try:
         results = model.predict(img, verbose=False)[0]
     except Exception as e:
