@@ -1,78 +1,52 @@
-# Project: Les Yeux
+# 👁️ Les Yeux: Visual Search App
 
-This project is designed to detect elevator signs using a custom-trained YOLOv8 model. It includes a backend server for inference and a frontend for user interaction.
+## 🌟 Inspiration
 
-## Prerequisites
+For people who are visually impaired, navigating their surroundings and locating specific objects can be challenging. Whether indoors or outdoors, they often require assistance to find items like water bottles, phones, or elevators. This inspired us to create "Les Yeux," a visual search app that empowers users to locate objects independently.
 
-1. **Install Node.js**: Ensure you have Node.js installed. You can download it from [Node.js official website](https://nodejs.org/).
-2. **Install Python**: Ensure Python 3.8+ is installed. You can download it from [Python official website](https://www.python.org/).
-3. **Install Git**: Ensure Git is installed. You can download it from [Git official website](https://git-scm.com/).
+## 🔍 What It Does
 
-## Setup Instructions
+Using audio input, the user specifies the object they want to find. The app scans the surroundings using the device's camera to detect the specified object. Once detected, the app provides feedback through a beep, indicating the direction.
 
-### 1. Clone the Repository
-```bash
-# Clone the repository to your local machine
-git clone https://github.com/hsqsh/maisHack25.git
-cd maisHack25
-```
+## 🛠️ How We Built It
 
-### 2. Set Up Python Environment
-```bash
-# Create and activate a virtual environment
-python -m venv .venv
-# On Windows
-.\.venv\Scripts\activate
-# On macOS/Linux
-source .venv/bin/activate
+- **Backend**: We utilized YOLOv8n for general object detection and trained a custom model specifically for STM elevator sign detection. The dataset, consisting of 102 photos, was created and labeled by our team using Roboflow. Preprocessing and augmentation techniques were applied to enhance the model's generalization capabilities.
+- **Frontend**: Built with Vue.js, the user interface is designed for maximum ease of use. The frontend accesses the camera and microphone through APIs and communicates with the backend via predefined endpoints. Vue.js state management is used to track application status, such as recording activity.
 
-# Install Python dependencies
-pip install -r models/requirements.txt
-```
+## 🚧 Challenges We Faced
 
-### 3. Set Up Frontend
-```bash
-# Navigate to the frontend directory
-cd objectDetectorFE
+1. **Platform Choice**: Initially, we planned to develop an Android app, but speech recognition was not feasible on the devices we had. We pivoted to a web application instead.
+2. **Integration Issues**: The model's accuracy dropped significantly when integrating the frontend and backend. We implemented patches in the frontend to address this.
+3. **Model Training**: Training a model is time-intensive. Instead of merging the STM elevator sign detection into the general model, we opted to use two models (YOLOv8n and our custom model) in parallel, achieving the same outcome.
 
-# Install Node.js dependencies
-npm install
-```
+## 🏆 Accomplishments
 
-### 4. Start Backend Server
-```bash
-# Navigate back to the project root
-cd ..
+- Created and labeled our own dataset.
+- Successfully trained a custom computer vision model for STM elevator sign detection.
+- Developed a functional and user-friendly web application.
 
-# Start the backend server
-.\.venv\Scripts\python.exe models\infer_server.py
-```
+## 📚 What We Learned
 
-### 5. Start Frontend
-```bash
-# Navigate to the frontend directory
-cd objectDetectorFE
+- How to create and label datasets.
+- Training computer vision models.
+- Building a frontend application using Vue.js.
 
-# Start the development server
-npm run dev
-```
+## 🚀 What's Next
 
-### 6. Access the Application
-- Open your browser and navigate to `http://localhost:5173` to use the application.
+- Deploy the app as a shortcut accessible on mobile devices.
+- Further optimize the models for faster and more accurate detection.
 
-## Usage
+## 🧩 Built With
 
-1. **Frontend**:
-   - Adjust settings like sensitivity and scan interval.
-   - Start detection by clicking the "Record" button.
-2. **Backend**:
-   - The backend processes images and returns detection results.
+- **JavaScript**
+- **Node.js**
+- **Vue.js**
+- **YOLOv8**
 
-## Troubleshooting
+## 🏅 Submitted To
 
-- **Port Conflicts**:
-  - Ensure no other processes are using ports `8000` (backend) or `5173` (frontend).
-  - Use `netstat -ano | findstr :8000` to check for processes using port `8000`.
-- **Dependencies**:
-  - Ensure all dependencies are installed correctly.
-  - Use `pip list` and `npm list` to verify.
+- MAIS Hacks 25-26
+
+---
+
+We hope "Les Yeux" can make a meaningful difference in the lives of visually impaired individuals by providing them with greater independence and confidence in their daily activities. ✨
