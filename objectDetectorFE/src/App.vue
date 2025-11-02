@@ -24,13 +24,38 @@ let videoEl
 let captureInterval
 let audioContext
 let oscillator
+let scanning = false
+let lastSeen = false
+let scanTimeout = null
 
 // Initialize audio context for feedback
 function initAudio() {
-  audioContext = new (window.AudioContext || window.webkitAudioContext)()
-  oscillator = audioContext.createOscillator()
-  oscillator.type = 'sine'
-  oscillator.frequency.setValueAtTime(440, audioContext.currentTime) // 440Hz = A4 note
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)()
+  }
+  if (!oscillator) {
+    oscillator = audioContext.createOscillator()
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(440, audioContext.currentTime) // 440Hz = A4 note
+  }
+}
+
+function playBeep(freq = 880, duration = 0.3) {
+  try {
+    if (!audioContext) initAudio()
+    const gainNode = audioContext.createGain()
+    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime)
+    gainNode.connect(audioContext.destination)
+
+    const beep = audioContext.createOscillator()
+    beep.type = 'sine'
+    beep.frequency.setValueAtTime(freq, audioContext.currentTime)
+    beep.connect(gainNode)
+    beep.start()
+    beep.stop(audioContext.currentTime + duration)
+  } catch (e) {
+    console.error('Audio feedback error:', e)
+  }
 }
 
 // Normalize the recognized target to increase matching probability with model labels
@@ -55,6 +80,19 @@ function startRecording() {
     return
   }
 
+  // If scanning is active, stop it so we can re-record a new target
+  if (scanning) {
+    if (captureInterval) {
+      clearInterval(captureInterval)
+      captureInterval = null
+    }
+    stopCamera()
+    scanning = false
+  }
+
+  // Reset seen-state so next detection will trigger feedback
+  lastSeen = false
+
   status.value = 'Listening...'
   isRecording.value = true
 
@@ -64,11 +102,11 @@ function startRecording() {
   recognition.start()
 
   recognition.onresult = (event) => {
-  const raw = event.results[0][0].transcript
-  targetObject = normalizeTarget(raw)
-  console.log('🎯 Target object (normalized):', targetObject, 'raw:', raw)
-  status.value = `Target: "${targetObject}" recorded.`
-}
+    const raw = event.results[0][0].transcript
+    targetObject = normalizeTarget(raw)
+    console.log('🎯 Target object (normalized):', targetObject, 'raw:', raw)
+    status.value = `Target: "${targetObject}" recorded.`
+  }
 
   recognition.onerror = (e) => {
     console.error('Speech error:', e)
@@ -83,6 +121,8 @@ function stopRecording() {
   recognition.stop()
   isRecording.value = false
   status.value = `Scanning for "${targetObject}"...`
+  // Reset lastSeen so the next positive detection triggers feedback
+  lastSeen = false
   startScanning()
 }
 
@@ -97,17 +137,23 @@ async function startScanning() {
     videoEl.style.display = 'none'
     document.body.appendChild(videoEl)
 
-    // Request camera access with higher resolution to improve detection accuracy
+    // Request camera access with specific settings to match direct camera usage
     videoStream = await navigator.mediaDevices.getUserMedia({
       video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+        width: { min: 640, ideal: 1280, max: 1920 },
+        height: { min: 480, ideal: 720, max: 1080 },
+        facingMode: "environment",  // Prefer back camera if available
+        frameRate: { ideal: 30 }
       }
     })
     videoEl.srcObject = videoStream
     await videoEl.play()
-
-    captureInterval = setInterval(captureFrame, 200) // Scan every second
+    if (captureInterval) {
+      clearInterval(captureInterval)
+      captureInterval = null
+    }
+    captureInterval = setInterval(captureFrame, 1000) // Scan every second
+    scanning = true
   } catch (err) {
     console.error('Camera error:', err)
     status.value = 'Camera access failed.'
@@ -116,16 +162,36 @@ async function startScanning() {
 
 // --- Capture frame and send to backend ---
 async function captureFrame() {
+  // if (!videoEl?.videoWidth) return
+
+  // const canvas = document.createElement('canvas')
+  // // Maintain aspect ratio but ensure minimum size
+  // const width = Math.max(640, videoEl.videoWidth)
+  // const height = Math.max(480, videoEl.videoHeight)
+  // canvas.width = width
+  // canvas.height = height
+  // const ctx = canvas.getContext('2d')
+  // // Use better quality image rendering
+  // ctx.imageSmoothingEnabled = true
+  // ctx.imageSmoothingQuality = 'high'
+  // ctx.drawImage(videoEl, 0, 0, width, height)
+
+  // // Convert to higher-quality base64 JPEG (reduce compression artifacts)
+  // const base64Image = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
   if (!videoEl?.videoWidth) return
 
   const canvas = document.createElement('canvas')
-  canvas.width = videoEl.videoWidth
-  canvas.height = videoEl.videoHeight
+  // Use fixed dimensions that match YOLO training
+  const width = 640
+  const height = 480
+  canvas.width = width
+  canvas.height = height
+  
   const ctx = canvas.getContext('2d')
-  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height)
+  ctx.drawImage(videoEl, 0, 0, width, height)
 
-  // Convert to higher-quality base64 JPEG (reduce compression artifacts)
-  const base64Image = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
+  // Use PNG to avoid compression artifacts
+  const base64Image = canvas.toDataURL('image/png').split(',')[1]
 
   try {
     const res = await fetch('http://localhost:8000/detect', {
@@ -136,33 +202,32 @@ async function captureFrame() {
       body: JSON.stringify({
         image_b64: base64Image,
         target: targetObject,
-        threshold: 0.4
+        threshold: 0.25  // Lower threshold for better detection
       })
     })
     const result = await res.json()
     
     if (result.found) {
-      console.log(`✅ Found ${targetObject}!`)
-      
-      // Provide both haptic and audio feedback
-      if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]) // Vibrate pattern: 200ms on, 100ms off, 200ms on
+      // Rising-edge detection: only give feedback when object transitions from not-seen -> seen
+      if (!lastSeen) {
+        console.log(`✅ Found ${targetObject}! (rising edge)`)
+        if (navigator.vibrate) {
+          navigator.vibrate([200, 100, 200])
+        }
+        playBeep(880, 0.3)
+        status.value = `Found "${targetObject}"!`
+        lastSeen = true
+      } else {
+        // Already seen; don't repeat feedback
+        status.value = `Monitoring "${targetObject}"...`
       }
-      
-      // Play audio tone
-      const gainNode = audioContext.createGain()
-      gainNode.gain.setValueAtTime(0.5, audioContext.currentTime)
-      gainNode.connect(audioContext.destination)
-      
-      const beep = audioContext.createOscillator()
-      beep.frequency.setValueAtTime(880, audioContext.currentTime) // Higher pitch for found object
-      beep.connect(gainNode)
-      beep.start()
-      beep.stop(audioContext.currentTime + 0.3) // Play for 300ms
-      
-      status.value = `Found "${targetObject}"!`
-      clearInterval(captureInterval)
-      stopCamera()
+    } else {
+      // Object not found in this frame; reset lastSeen so next detection will trigger feedback
+      if (lastSeen) {
+        console.log(`Object "${targetObject}" no longer visible`)
+      }
+      lastSeen = false
+      status.value = `Searching for "${targetObject}"...`
     }
   } catch (err) {
     console.error('Detection error:', err)
@@ -179,6 +244,12 @@ function stopCamera() {
   if (videoEl) {
     videoEl.remove()
     videoEl = null
+  }
+  // mark scanning stopped
+  scanning = false
+  if (captureInterval) {
+    clearInterval(captureInterval)
+    captureInterval = null
   }
 }
 </script>
