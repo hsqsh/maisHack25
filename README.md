@@ -1,4 +1,4 @@
-# Project: Elevator Sign Detection
+# Project: Les Yeux
 
 This project is designed to detect elevator signs using a custom-trained YOLOv8 model. It includes a backend server for inference and a frontend for user interaction.
 
