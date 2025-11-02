@@ -14,3 +14,5 @@
 
 python setup_environment.py
 
+Active the backend in the models.
+Then active the frontend in the objectDetectorFE
