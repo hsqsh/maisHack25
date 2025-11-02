@@ -22,6 +22,9 @@ env/
 runs/
 !runs/detect/elevator_sign_yolov8n/weights/best.pt
 !yolov8n.pt
+# 允许数据集被跟踪
+!models/elevatorSigns-3/
+!models/elevatorSigns-3/**
 # Common large exports (keep weights you intentionally track)
 *.onnx
 *.engine
