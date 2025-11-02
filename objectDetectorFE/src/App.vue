@@ -2,6 +2,13 @@
   <div class="app">
     <h1>Voice Object Detector</h1>
 
+    <div class="health" :class="backendHealth === 'ok' ? 'ok' : (backendHealth === 'fail' ? 'fail' : 'checking')">
+      Backend: 
+      <span v-if="backendHealth === 'ok'">OK</span>
+      <span v-else-if="backendHealth === 'fail'">Offline</span>
+      <span v-else>Checking…</span>
+    </div>
+
     <p v-if="status">{{ status }}</p>
 
     <div class="buttons">
@@ -12,11 +19,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
 // --- Reactive states ---
 const isRecording = ref(false)
 const status = ref('')
+const backendHealth = ref('checking') // 'checking' | 'ok' | 'fail'
 let recognition
 let targetObject = ''
 let videoStream
@@ -39,6 +47,17 @@ function initAudio() {
     oscillator.frequency.setValueAtTime(440, audioContext.currentTime) // 440Hz = A4 note
   }
 }
+
+// --- Check backend health on mount ---
+onMounted(async () => {
+  try {
+    const r = await fetch('http://localhost:8000/health')
+    const j = await r.json()
+    backendHealth.value = j?.ok ? 'ok' : 'fail'
+  } catch (e) {
+    backendHealth.value = 'fail'
+  }
+})
 
 function playBeep(freq = 880, duration = 0.3) {
   try {
@@ -208,25 +227,13 @@ async function captureFrame() {
     const result = await res.json()
     
     if (result.found) {
-      // Rising-edge detection: only give feedback when object transitions from not-seen -> seen
-      if (!lastSeen) {
-        console.log(`✅ Found ${targetObject}! (rising edge)`)
-        if (navigator.vibrate) {
-          navigator.vibrate([200, 100, 200])
-        }
-        playBeep(880, 0.3)
-        status.value = `Found "${targetObject}"!`
-        lastSeen = true
-      } else {
-        // Already seen; don't repeat feedback
-        status.value = `Monitoring "${targetObject}"...`
+      // Play beep every time the target is detected
+      playBeep(880, 0.3)
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200])
       }
+      status.value = `Found "${targetObject}"!`
     } else {
-      // Object not found in this frame; reset lastSeen so next detection will trigger feedback
-      if (lastSeen) {
-        console.log(`Object "${targetObject}" no longer visible`)
-      }
-      lastSeen = false
       status.value = `Searching for "${targetObject}"...`
     }
   } catch (err) {
@@ -270,6 +277,14 @@ h1 {
   font-size: 1.8rem;
   margin-bottom: 1rem;
 }
+
+.health {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}
+.health.ok { color: #16a34a; }
+.health.fail { color: #dc2626; }
+.health.checking { color: #64748b; }
 
 .buttons {
   margin-top: 1.5rem;
