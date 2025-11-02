@@ -1,16 +1,13 @@
-Hi this is read me :)
-Follow the git role
 
 
-
-# 1) 切到项目根（如果你已在根目录可跳过）
+# 1) to the root
 
 ```
-cd D:\Desktop\McGill\maisHack25
+\maisHack25
 ```
 
 
-# 2) 激活虚拟环境
+# 2) active virtual env
 ```
 .\.venv\Scripts\Activate.ps1
 ```
