@@ -46,10 +46,23 @@ def infer_on_pil(model: YOLO, pil_img: Image.Image, target: str, threshold: floa
                 found = True
     return found, detections
 
+def infer_on_pil_dual(pil_img: Image.Image, target: str, threshold: float, model_coco: YOLO, model_custom: YOLO) -> Tuple[bool, List[dict]]:
+    # 先用 COCO 模型
+    found_coco, det_coco = infer_on_pil(model_coco, pil_img, target, threshold)
+    # 再用自定义模型
+    found_custom, det_custom = infer_on_pil(model_custom, pil_img, target, threshold)
+    # 合并结果
+    found = found_coco or found_custom
+    detections = det_coco + det_custom
+    return found, detections
+
 
 def run_image(model: YOLO, image_path: str, target: str, threshold: float, save_path: Optional[str]):
     pil_img = Image.open(image_path).convert("RGB")
-    found, detections = infer_on_pil(model, pil_img, target, threshold)
+    # 加载两个模型
+    model_coco = YOLO("yolov8n.pt")
+    model_custom = model
+    found, detections = infer_on_pil_dual(pil_img, target, threshold, model_coco, model_custom)
     print({"found": found, "detections": detections})
     if save_path:
         # draw and save
@@ -116,6 +129,10 @@ def run_webcam(
         if cap is None:
             raise RuntimeError(f"Cannot open webcam {cam_index}")
 
+    # 加载两个模型
+    model_coco = YOLO("yolov8n.pt")
+    model_custom = model
+
     last_log = 0.0
     start_time = time.time()
     frame_count = 0
@@ -148,29 +165,39 @@ def run_webcam(
                 break
             frame_count += 1
             pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            found, detections = infer_on_pil(model, pil_img, target, threshold)
+            found, detections = infer_on_pil_dual(pil_img, target, threshold, model_coco, model_custom)
             if not no_display:
                 vis = draw_boxes(frame.copy(), detections)
                 if found:
                     cv2.putText(vis, f"FOUND {target}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                 if frame_count == 1:
-                    print("[yolo-local] Press 'q' or ESC in the window to quit. Ctrl+C also works.")
+                    print("[yolo-local] Press 'q', ESC, Enter, or x in the window to quit. Ctrl+C also works.")
                 cv2.imshow(window_name, vis)
-                # If window was closed by user
-                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-                    print("[yolo-local] Window closed, exiting...")
+                # Robust window closed check
+                try:
+                    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                        print("[yolo-local] Window closed, exiting...")
+                        break
+                except Exception:
+                    print("[yolo-local] Window property check failed, exiting...")
                     break
                 key = cv2.waitKey(1) & 0xFF
-                if key in (27, ord('q')):  # ESC or q to quit
+                if key in (27, ord('q'), 13, ord('x')):  # ESC, q, Enter, x to quit
                     break
             # Throttled log when found
             if found and (time.time() - last_log) > 1.0:
                 last_log = time.time()
                 print(f"FOUND {target} @ {time.strftime('%H:%M:%S')}")
     finally:
-        cap.release()
+        try:
+            cap.release()
+        except Exception:
+            pass
         if not no_display:
-            cv2.destroyAllWindows()
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
 
 
 def main():

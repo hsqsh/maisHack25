@@ -1,0 +1,12 @@
+names:
+- elevator
+nc: 1
+roboflow:
+  license: CC BY 4.0
+  project: elevatorsigns-oarrx
+  url: https://universe.roboflow.com/sihan/elevatorsigns-oarrx/dataset/3
+  version: 3
+  workspace: sihan
+test: ../test/images
+train: ../train/images
+val: ../valid/images

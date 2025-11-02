@@ -18,8 +18,10 @@ venv/
 env/
 
 # ---- Ultralytics / YOLO ----
-# Training/eval outputs
+# Training/eval outputs (except weights you want to track)
 runs/
+!runs/detect/elevator_sign_yolov8n/weights/best.pt
+!yolov8n.pt
 # Common large exports (keep weights you intentionally track)
 *.onnx
 *.engine
