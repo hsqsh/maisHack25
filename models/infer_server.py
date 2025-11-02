@@ -24,29 +24,23 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# 模型加载（首启会下载权重）
-MODEL_PATH = os.environ.get("MODEL_PATH", "yolov8n.pt")
-# Load two models: COCO official model and an optional custom trained model
-COCO_MODEL_PATH = os.environ.get("COCO_MODEL_PATH", MODEL_PATH)
-CUSTOM_MODEL_PATH = os.environ.get(
-    "CUSTOM_MODEL_PATH",
-    os.path.join(os.path.dirname(__file__), "..", "runs", "detect", "elevator_sign_yolov8n", "weights", "best.pt"),
-)
+import os
+# Explicitly load COCO and custom model from fixed paths
+COCO_MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "yolov8n.pt")
+CUSTOM_MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "runs", "detect", "elevator_sign_yolov8n", "weights", "best.pt")
 
-# Load models once at startup
 try:
     coco_model = YOLO(COCO_MODEL_PATH)
-except Exception:
-    coco_model = YOLO(MODEL_PATH)
-
+except Exception as e:
+    raise RuntimeError(f"Failed to load COCO model from {COCO_MODEL_PATH}: {e}")
 try:
     custom_model = YOLO(CUSTOM_MODEL_PATH)
-except Exception:
-    custom_model = None
+except Exception as e:
+    raise RuntimeError(f"Failed to load custom model from {CUSTOM_MODEL_PATH}: {e}")
 
 # Per-model default confidence thresholds (can be overridden via env)
 COCO_CONF_THRESH = float(os.environ.get("COCO_CONF_THRESH", "0.25"))
-CUSTOM_CONF_THRESH = float(os.environ.get("CUSTOM_CONF_THRESH", "0.5"))
+CUSTOM_CONF_THRESH = float(os.environ.get("CUSTOM_CONF_THRESH", "0.25"))
 
 
 @app.get("/health")
@@ -64,18 +58,27 @@ def detect(req: DetectReq):
 
     # (debug image saving removed)
 
-    # Run inference on COCO model and (optionally) the custom model, then merge results
-    try:
-        results_coco = coco_model.predict(img, verbose=False)[0]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"coco infer failed: {e}")
+    req_conf = float(req.threshold)
+    target_lower = req.target.lower().strip()
 
+    results_coco = None
     results_custom = None
-    if custom_model is not None:
+
+    # Only use COCO model for non-elevator targets
+    if target_lower != "elevator":
+        coco_conf = max(req_conf, COCO_CONF_THRESH)
         try:
-            results_custom = custom_model.predict(img, verbose=False)[0]
-        except Exception:
-            results_custom = None
+            results_coco = coco_model.predict(img, verbose=False, conf=coco_conf)[0]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"coco infer failed: {e}")
+    
+    # Always use custom model for elevator target
+    if target_lower == "elevator":
+        custom_conf = max(req_conf, CUSTOM_CONF_THRESH)
+        try:
+            results_custom = custom_model.predict(img, verbose=False, conf=custom_conf)[0]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"custom model infer failed: {e}")
 
     def extract(results):
         out = []
@@ -96,17 +99,17 @@ def detect(req: DetectReq):
                 continue
         return out
 
-    # extract separately and apply per-model thresholds
-    dets_coco = extract(results_coco)
-    dets_custom = extract(results_custom)
+    # Extract detections from the appropriate model based on target
+    detections = []
+    if target_lower == "elevator":
+        detections = extract(results_custom)  # Only use custom model for elevators
+    else:
+        detections = extract(results_coco)    # Only use COCO model for other targets
 
-    # request-level threshold (acts as minimum on top of model defaults)
-    req_conf = float(req.threshold)
-
-    filtered_coco = [d for d in dets_coco if d.get("conf", 0.0) >= max(req_conf, COCO_CONF_THRESH)]
-    filtered_custom = [d for d in dets_custom if d.get("conf", 0.0) >= max(req_conf, CUSTOM_CONF_THRESH)]
-
-    dets = filtered_coco + filtered_custom
+    # Apply confidence threshold based on which model was used
+    threshold = max(req_conf, CUSTOM_CONF_THRESH if target_lower == "elevator" else COCO_CONF_THRESH)
+    filtered_dets = [d for d in detections if d.get("conf", 0.0) >= threshold]
+    dets = filtered_dets
 
     # simple duplicate suppression: keep highest-confidence detection for same label with IoU > 0.5
     def iou(boxA, boxB):
@@ -141,9 +144,29 @@ def detect(req: DetectReq):
     detections = kept
     found = any(det["label"].lower() == req.target.lower() for det in detections)
 
-    # (annotated debug image saving removed)
-    
-    return {"found": found, "detections": detections}
+    # 生成带框预览图片
+    preview_img = img.copy()
+    draw = ImageDraw.Draw(preview_img)
+    for det in detections:
+        box = det["box"]
+        label = det["label"]
+        conf = det["conf"]
+        x1, y1, x2, y2 = box
+        # 画框
+        draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
+        # 画标签
+        draw.text((x1, y1 - 12), f"{label} {conf:.2f}", fill="red")
+    # 转 PNG base64
+    print("[detect] returning preview_b64", flush=True)
+    buf = io.BytesIO()
+    preview_img.save(buf, format="PNG")
+    preview_b64 = base64.b64encode(buf.getvalue()).decode()
+    return {
+        "found": found,
+        "detections": detections,
+        "preview_b64": preview_b64,
+        "backend_version": "with_preview"
+    }
 
 
 if __name__ == "__main__":

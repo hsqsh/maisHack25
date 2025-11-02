@@ -9,11 +9,53 @@
       <span v-else>Checking…</span>
     </div>
 
+    <div class="controls">
+      <label class="ctrl">
+        <input type="checkbox" v-model="beepOn" />
+        Beep on detection
+      </label>
+      <label class="ctrl">
+        Sensitivity: {{ threshold.toFixed(2) }}
+        <input type="range" min="0.10" max="0.90" step="0.05" v-model.number="threshold" />
+      </label>
+      <label class="ctrl">
+        Scan interval: {{ scanInterval.toFixed(2) }}s
+        <input type="range" min="0.1" max="1" step="0.01" v-model.number="scanInterval" />
+      </label>
+      <label class="ctrl">
+        <input type="checkbox" v-model="debugMode" />
+        Debug: save frames & show confidences
+      </label>
+    </div>
+
+    <div class="preview" v-if="previewSrc">
+      <div class="preview-header">Detection Preview</div>
+      <img :src="previewSrc" alt="Detection preview" />
+    </div>
+    <div class="debug-panel" v-if="debugMode">
+      <div class="debug-header">Debug Snapshots</div>
+      <div v-if="debugSnapshots.length" class="debug-list">
+        <div class="debug-item" v-for="snap in debugSnapshots" :key="snap.id">
+          <div class="debug-meta">
+            <strong>{{ snap.time }}</strong>
+            <a :href="snap.frameSrc" :download="`frame-${snap.id}.png`">Download frame</a>
+          </div>
+          <ul class="debug-detections" v-if="snap.detections.length">
+            <li v-for="(det, idx) in snap.detections" :key="idx">
+              {{ det.label }} — {{ (det.conf * 100).toFixed(1) }}%
+            </li>
+          </ul>
+          <div v-else class="debug-empty">No detections</div>
+        </div>
+      </div>
+      <div v-else class="debug-empty">No frames captured yet.</div>
+    </div>
     <p v-if="status">{{ status }}</p>
 
     <div class="buttons">
       <button @click="startRecording" :disabled="isRecording">🎙️ Record</button>
       <button @click="stopRecording" :disabled="!isRecording">🛑 Stop</button>
+      <button @click="stopDetecting">⏹️ Stop Detecting</button>
     </div>
   </div>
 </template>
@@ -25,6 +67,13 @@ import { ref, onMounted } from 'vue'
 const isRecording = ref(false)
 const status = ref('')
 const backendHealth = ref('checking') // 'checking' | 'ok' | 'fail'
+const beepOn = ref(true)
+const threshold = ref(0.25)
+const scanInterval = ref(1.0) // seconds
+const previewSrc = ref('')
+const debugMode = ref(false)
+const debugSnapshots = ref([])
+const latestFrameSrc = ref('')
 let recognition
 let targetObject = ''
 let videoStream
@@ -148,20 +197,16 @@ function stopRecording() {
 // --- Start scanning with camera ---
 async function startScanning() {
   try {
-    // Initialize audio context
     initAudio()
-    
     videoEl = document.createElement('video')
     videoEl.setAttribute('playsinline', true)
     videoEl.style.display = 'none'
     document.body.appendChild(videoEl)
-
-    // Request camera access with specific settings to match direct camera usage
     videoStream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { min: 640, ideal: 1280, max: 1920 },
         height: { min: 480, ideal: 720, max: 1080 },
-        facingMode: "environment",  // Prefer back camera if available
+        facingMode: "environment",
         frameRate: { ideal: 30 }
       }
     })
@@ -171,7 +216,8 @@ async function startScanning() {
       clearInterval(captureInterval)
       captureInterval = null
     }
-    captureInterval = setInterval(captureFrame, 1000) // Scan every second
+    // Use scanInterval (seconds) for interval
+    captureInterval = setInterval(captureFrame, scanInterval.value * 1000)
     scanning = true
   } catch (err) {
     console.error('Camera error:', err)
@@ -194,7 +240,6 @@ async function captureFrame() {
   // ctx.imageSmoothingEnabled = true
   // ctx.imageSmoothingQuality = 'high'
   // ctx.drawImage(videoEl, 0, 0, width, height)
-
   // // Convert to higher-quality base64 JPEG (reduce compression artifacts)
   // const base64Image = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
   if (!videoEl?.videoWidth) return
@@ -210,7 +255,9 @@ async function captureFrame() {
   ctx.drawImage(videoEl, 0, 0, width, height)
 
   // Use PNG to avoid compression artifacts
-  const base64Image = canvas.toDataURL('image/png').split(',')[1]
+  const dataUrl = canvas.toDataURL('image/png')
+  latestFrameSrc.value = dataUrl
+  const base64Image = dataUrl.split(',')[1]
 
   try {
     const res = await fetch('http://localhost:8000/detect', {
@@ -221,14 +268,29 @@ async function captureFrame() {
       body: JSON.stringify({
         image_b64: base64Image,
         target: targetObject,
-        threshold: 0.25  // Lower threshold for better detection
+        threshold: threshold.value
       })
     })
     const result = await res.json()
-    
+    // 实时预览带框图片
+    if (result.preview_b64) {
+      previewSrc.value = `data:image/png;base64,${result.preview_b64}`
+    }
+    if (debugMode.value) {
+      debugSnapshots.value = [
+        {
+          id: Date.now(),
+          time: new Date().toLocaleTimeString(),
+          frameSrc: latestFrameSrc.value,
+          detections: Array.isArray(result.detections) ? result.detections : []
+        },
+        ...debugSnapshots.value
+      ].slice(0, 10)
+    }
     if (result.found) {
-      // Play beep every time the target is detected
-      playBeep(880, 0.3)
+      if (beepOn.value) {
+        playBeep(880, 0.3)
+      }
       if (navigator.vibrate) {
         navigator.vibrate([200, 100, 200])
       }
@@ -242,6 +304,14 @@ async function captureFrame() {
   }
 }
 
+// --- Stop detection (camera + scanning loop) ---
+function stopDetecting() {
+  // stop camera and scanning interval
+  stopCamera()
+  lastSeen = false
+  status.value = 'Detection stopped.'
+}
+
 // --- Stop camera ---
 function stopCamera() {
   if (videoStream) {
@@ -252,13 +322,21 @@ function stopCamera() {
     videoEl.remove()
     videoEl = null
   }
-  // mark scanning stopped
   scanning = false
   if (captureInterval) {
     clearInterval(captureInterval)
     captureInterval = null
   }
 }
+
+// --- Watch scanInterval and update interval dynamically ---
+import { watch } from 'vue'
+watch(scanInterval, (newVal) => {
+  if (scanning && captureInterval) {
+    clearInterval(captureInterval)
+    captureInterval = setInterval(captureFrame, newVal * 1000)
+  }
+})
 </script>
 
 <style>
@@ -290,6 +368,16 @@ h1 {
   margin-top: 1.5rem;
 }
 
+.controls {
+  margin: 0.5rem 0 0.75rem;
+}
+.ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+}
+
 button {
   margin: 0 0.5rem;
   padding: 0.75rem 1.25rem;
@@ -316,3 +404,68 @@ p {
   font-size: 1rem;
 }
 </style>
+.preview {
+  margin-top: 0.75rem;
+}
+.preview-header {
+  width: 640px;
+  font-size: 0.9rem;
+  color: #475569;
+  margin-bottom: 0.25rem;
+}
+.preview img {
+  width: 640px;
+  height: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+.debug-panel {
+  width: 640px;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid #cbd5f5;
+  border-radius: 8px;
+  background-color: #f1f5ff;
+  color: #1e293b;
+}
+.debug-header {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.debug-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.debug-item {
+  padding: 0.5rem;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.debug-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+}
+.debug-meta a {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 500;
+}
+.debug-meta a:hover {
+  text-decoration: underline;
+}
+.debug-detections {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.85rem;
+}
+.debug-empty {
+  font-size: 0.85rem;
+  color: #64748b;
+}

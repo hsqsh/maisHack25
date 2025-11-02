@@ -57,11 +57,11 @@ def infer_on_pil_dual(pil_img: Image.Image, target: str, threshold: float, model
     return found, detections
 
 
-def run_image(model: YOLO, image_path: str, target: str, threshold: float, save_path: Optional[str]):
+def run_image(image_path: str, target: str, threshold: float, save_path: Optional[str]):
     pil_img = Image.open(image_path).convert("RGB")
     # 加载两个模型
-    model_coco = YOLO("yolov8n.pt")
-    model_custom = model
+    model_coco = YOLO(os.path.join(os.path.dirname(__file__), "..", "yolov8n.pt"))
+    model_custom = YOLO(os.path.join(os.path.dirname(__file__), "..", "runs", "detect", "elevator_sign_yolov8n", "weights", "best.pt"))
     found, detections = infer_on_pil_dual(pil_img, target, threshold, model_coco, model_custom)
     print({"found": found, "detections": detections})
     if save_path:
@@ -111,7 +111,6 @@ def _on_signal(signum, frame):
 
 
 def run_webcam(
-    model: YOLO,
     cam_index: int,
     target: str,
     threshold: float,
@@ -130,8 +129,8 @@ def run_webcam(
             raise RuntimeError(f"Cannot open webcam {cam_index}")
 
     # 加载两个模型
-    model_coco = YOLO("yolov8n.pt")
-    model_custom = model
+    model_coco = YOLO(os.path.join(os.path.dirname(__file__), "..", "yolov8n.pt"))
+    model_custom = YOLO(os.path.join(os.path.dirname(__file__), "..", "runs", "detect", "elevator_sign_yolov8n", "weights", "best.pt"))
 
     last_log = 0.0
     start_time = time.time()
@@ -202,7 +201,6 @@ def run_webcam(
 
 def main():
     parser = argparse.ArgumentParser(description="Local YOLOv8 runner without any server")
-    parser.add_argument("--model", default=os.environ.get("MODEL_PATH", "yolov8n.pt"))
     parser.add_argument("--target", default="bottle")
     parser.add_argument("--threshold", type=float, default=0.4)
     g = parser.add_mutually_exclusive_group(required=True)
@@ -214,13 +212,10 @@ def main():
     parser.add_argument("--max-frames", type=int, default=0, help="Auto-quit after N frames (0 = no limit)")
     args = parser.parse_args()
 
-    model = YOLO(args.model)
-
     if args.image:
-        run_image(model, args.image, args.target, args.threshold, args.save)
+        run_image(args.image, args.target, args.threshold, args.save)
     else:
         run_webcam(
-            model,
             args.webcam,
             args.target,
             args.threshold,
